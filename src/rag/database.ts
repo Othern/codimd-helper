@@ -22,7 +22,17 @@ export class RagDatabase {
   async initialize(): Promise<void> {
     const dimensions = validateDimensions(this.config.ragEmbeddingDimensions);
 
-    await this.pool.query("CREATE EXTENSION IF NOT EXISTS vector");
+    try {
+      await this.pool.query("CREATE EXTENSION IF NOT EXISTS vector");
+    } catch (error) {
+      if (isPgVectorMissingError(error)) {
+        throw new Error(
+          "pgvector is not installed in this PostgreSQL instance. Install the pgvector package/extension in the database container or host, then rerun `codimd-helper rag init --json`."
+        );
+      }
+
+      throw error;
+    }
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS rag_chunks (
         id text PRIMARY KEY,
@@ -266,4 +276,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isStringRecord(value: unknown): value is Record<string, string> {
   return isRecord(value) && Object.values(value).every((item) => typeof item === "string");
+}
+
+function isPgVectorMissingError(error: unknown): boolean {
+  if (!isRecord(error)) {
+    return false;
+  }
+
+  return error.code === "58P01" || String(error.message ?? "").includes("extension/vector.control");
 }

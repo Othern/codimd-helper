@@ -296,6 +296,18 @@ codimd-helper rag search-chunks --embedding "[0.1,0.2,0.3]" --limit 8 --json
 
 - The server-side `.env` is missing or the wrapper is not running from the project directory.
 
+`could not open extension control file ... vector.control`
+
+- PostgreSQL does not have the `pgvector` extension installed.
+- Install pgvector in the same PostgreSQL environment that `CODIMD_DB_URL` points to, then rerun:
+
+```bash
+codimd-helper rag init --json
+```
+
+- If PostgreSQL runs in Docker, install pgvector inside the database image/container or switch to an image that includes pgvector.
+- If PostgreSQL runs on the host, install the package matching the server version, for example `postgresql-16-pgvector` on Debian/Ubuntu systems when PostgreSQL 16 is used.
+
 `getaddrinfo EAI_AGAIN HOST`
 
 - `.env` still contains placeholder values from `.env.example`.

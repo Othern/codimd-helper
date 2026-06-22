@@ -307,6 +307,7 @@ Common fixes:
 
 - `command not found`: install or symlink `/usr/local/bin/codimd-helper` on the CodiMD server.
 - `CODIMD_DB_URL is not configured`: check the server-side `.env`.
+- `could not open extension control file ... vector.control`: install pgvector in the PostgreSQL host/container that `CODIMD_DB_URL` points to, then rerun `codimd-helper rag init --json`.
 - `password/publickey denied`: fix SSH credentials from the agent machine.
 - Repeated password prompts: configure SSH key authentication or load the key into `ssh-agent`.
 - PostgreSQL connection errors: verify Docker compose database port or server-side DB URL.
