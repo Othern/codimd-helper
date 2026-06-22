@@ -7,6 +7,8 @@ export interface AppConfig {
   cachePath: string;
   ragEmbeddingDimensions: number;
   ragAnswerSimilarityThreshold: number;
+  ragChunkMaxChars: number;
+  ragChunkOverlapChars: number;
 }
 
 export function loadConfig(): AppConfig {
@@ -16,7 +18,9 @@ export function loadConfig(): AppConfig {
     indexPath: process.env.INDEX_PATH ?? "./data/index",
     cachePath: process.env.CACHE_PATH ?? "./data/cache",
     ragEmbeddingDimensions: parsePositiveInteger(process.env.RAG_EMBEDDING_DIMENSIONS, 1536),
-    ragAnswerSimilarityThreshold: parseSimilarityThreshold(process.env.RAG_ANSWER_SIMILARITY_THRESHOLD, 0.9)
+    ragAnswerSimilarityThreshold: parseSimilarityThreshold(process.env.RAG_ANSWER_SIMILARITY_THRESHOLD, 0.9),
+    ragChunkMaxChars: parsePositiveInteger(process.env.RAG_CHUNK_MAX_CHARS, 1800),
+    ragChunkOverlapChars: parsePositiveInteger(process.env.RAG_CHUNK_OVERLAP_CHARS, 200)
   };
 }
 

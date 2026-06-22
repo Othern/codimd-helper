@@ -3,6 +3,8 @@ import { loadConfig } from "../config.js";
 import { CodimdDatabase } from "../codimd/database.js";
 import { searchNotes } from "../indexer/search.js";
 import { RagDatabase } from "../rag/database.js";
+import { generateLocalEmbedding } from "../rag/embedding.js";
+import { indexNote, indexSearchResults } from "../rag/indexer.js";
 import { normalizeQuestion, parseEmbedding } from "../rag/vector.js";
 
 export function runCli(argv = process.argv): void {
@@ -143,19 +145,67 @@ export function runCli(argv = process.argv): void {
   rag
     .command("search-cache")
     .argument("<question>", "Question to match against cached answers")
-    .requiredOption("--embedding <json>", "Question embedding as a JSON number array")
+    .option("--embedding <json>", "Question embedding as a JSON number array")
     .option("--limit <number>", "Maximum number of cached answers", "3")
     .option("--json", "Print machine-readable JSON")
-    .action(async (question: string, options: { embedding: string; limit: string; json?: boolean }) => {
+    .action(async (question: string, options: { embedding?: string; limit: string; json?: boolean }) => {
       const database = new RagDatabase(config);
 
       try {
-        const answers = await database.findCachedAnswer(question, parseEmbedding(options.embedding), Number.parseInt(options.limit, 10));
+        const embedding = options.embedding ? parseEmbedding(options.embedding) : generateLocalEmbedding(question, config.ragEmbeddingDimensions).embedding;
+        const answers = await database.findCachedAnswer(question, embedding, Number.parseInt(options.limit, 10));
         print({ ok: true, cacheHit: answers.length > 0, answers }, Boolean(options.json));
       } catch (error) {
         fail(error, Boolean(options.json));
       } finally {
         await database.close();
+      }
+    });
+
+  rag
+    .command("retrieve")
+    .argument("<query>", "Question or search text to retrieve RAG chunks for")
+    .option("--limit <number>", "Maximum number of chunks", "8")
+    .option("--note-id <noteId...>", "Restrict retrieval to specific note IDs")
+    .option("--json", "Print machine-readable JSON")
+    .action(async (query: string, options: { limit: string; noteId?: string[]; json?: boolean }) => {
+      const database = new RagDatabase(config);
+
+      try {
+        const generated = generateLocalEmbedding(query, config.ragEmbeddingDimensions);
+        const chunks = await database.searchChunks(generated.embedding, Number.parseInt(options.limit, 10), options.noteId);
+        print({ ok: true, embeddingProvider: generated.provider, chunks }, Boolean(options.json));
+      } catch (error) {
+        fail(error, Boolean(options.json));
+      } finally {
+        await database.close();
+      }
+    });
+
+  rag
+    .command("index-note")
+    .argument("<noteIdOrUrl>", "CodiMD note ID or URL to index into RAG chunks")
+    .option("--json", "Print machine-readable JSON")
+    .action(async (noteIdOrUrl: string, options: { json?: boolean }) => {
+      try {
+        const result = await indexNote(config, noteIdOrUrl);
+        print({ ok: true, note: result }, Boolean(options.json));
+      } catch (error) {
+        fail(error, Boolean(options.json));
+      }
+    });
+
+  rag
+    .command("index")
+    .requiredOption("--query <query>", "Search query whose matching notes should be indexed")
+    .option("--limit <number>", "Maximum number of notes to index", "10")
+    .option("--json", "Print machine-readable JSON")
+    .action(async (options: { query: string; limit: string; json?: boolean }) => {
+      try {
+        const result = await indexSearchResults(config, options.query, Number.parseInt(options.limit, 10));
+        print({ ok: true, ...result }, Boolean(options.json));
+      } catch (error) {
+        fail(error, Boolean(options.json));
       }
     });
 

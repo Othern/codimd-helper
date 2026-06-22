@@ -236,6 +236,8 @@ Configure the embedding shape:
 ```env
 RAG_EMBEDDING_DIMENSIONS=1536
 RAG_ANSWER_SIMILARITY_THRESHOLD=0.9
+RAG_CHUNK_MAX_CHARS=1800
+RAG_CHUNK_OVERLAP_CHARS=200
 ```
 
 Initialize the RAG tables and HNSW indexes:
@@ -283,6 +285,26 @@ Search note chunks when there is no trusted cached answer:
 
 ```bash
 codimd-helper rag search-chunks --embedding "[0.1,0.2,0.3]" --limit 8 --json
+```
+
+The CLI also includes a local hash embedding pipeline so indexing can run before an external embedding provider is configured. It is deterministic and useful for wiring the RAG flow, but a model-based embedding provider should replace it for better semantic recall.
+
+Index one note:
+
+```bash
+codimd-helper rag index-note "<note-id-or-url>" --json
+```
+
+Index notes found by keyword search:
+
+```bash
+codimd-helper rag index --query "3GPP" --limit 10 --json
+```
+
+Retrieve RAG chunks with the local embedding pipeline:
+
+```bash
+codimd-helper rag retrieve "3GPP SIB 19" --limit 8 --json
 ```
 
 ## Troubleshooting

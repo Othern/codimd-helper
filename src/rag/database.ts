@@ -143,6 +143,10 @@ export class RagDatabase {
     );
   }
 
+  async deleteChunksForNote(noteId: string): Promise<void> {
+    await this.pool.query("DELETE FROM rag_chunks WHERE note_id = $1", [noteId]);
+  }
+
   async findCachedAnswer(question: string, questionEmbedding: number[], limit = 3): Promise<CachedRagAnswerMatch[]> {
     assertEmbeddingDimensions(questionEmbedding, this.config.ragEmbeddingDimensions);
 

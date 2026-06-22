@@ -69,6 +69,9 @@ The server-side CLI should expose these commands:
 - `codimd-helper rag init`
 - `codimd-helper rag search-cache`
 - `codimd-helper rag search-chunks`
+- `codimd-helper rag retrieve`
+- `codimd-helper rag index-note`
+- `codimd-helper rag index`
 - `codimd-helper rag upsert-chunk`
 - `codimd-helper rag upsert-answer`
 
@@ -124,6 +127,12 @@ If the cached answer is missing, weak, stale, or source-less, search chunks:
 ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag search-chunks --embedding "<json-vector>" --limit 8 --json
 ```
 
+If no external embedding is available, use the built-in local hash embedding retrieval:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag retrieve "<query>" --limit 8 --json
+```
+
 When generating a final answer from chunks:
 
 1. Prefer chunk `summary` for quick synthesis.
@@ -173,6 +182,20 @@ ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag upsert-chunk \
 ```
 
 Embeddings must be JSON arrays whose length matches `RAG_EMBEDDING_DIMENSIONS` on the server.
+
+For built-in indexing, index a specific note:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag index-note "<note-url-or-id>" --json
+```
+
+Or index notes found by keyword search:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag index --query "<query>" --limit 10 --json
+```
+
+The built-in indexer currently uses deterministic local hash embeddings. Treat it as a working baseline for cache and retrieval plumbing; use a model-based embedding provider when semantic recall matters.
 
 ### Search Notes
 

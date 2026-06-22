@@ -8,7 +8,9 @@ describe("CodimdClient", () => {
       indexPath: "./data/index",
       cachePath: "./data/cache",
       ragEmbeddingDimensions: 1536,
-      ragAnswerSimilarityThreshold: 0.9
+      ragAnswerSimilarityThreshold: 0.9,
+      ragChunkMaxChars: 1800,
+      ragChunkOverlapChars: 200
     });
 
     expect(client.baseUrl).toBe("http://140.115.52.84:3000");
