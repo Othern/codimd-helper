@@ -1,14 +1,26 @@
-# CodiMD Remote Knowledge Skill
+# CodiMD RAG Knowledge Skill
 
-Use this skill when the user wants to search, read, summarize, create, update, or organize notes in the CodiMD instance at `http://140.115.52.84:3000`.
+Use this skill when the user wants to search, retrieve, summarize, answer questions from, create, update, or organize notes in the CodiMD instance at `http://140.115.52.84:3000`.
 
 ## Purpose
 
-This skill lets an agent query the CodiMD knowledge base from any machine by executing the `codimd-helper` CLI on the CodiMD server over SSH.
+This skill gives agents a safe remote interface to the CodiMD knowledge base through the server-side `codimd-helper` CLI.
 
-The agent machine should not connect to the PostgreSQL database directly. The database URL and credentials stay on the CodiMD server.
+The preferred knowledge workflow is:
 
-## Remote Execution Model
+```text
+question
+  -> answer cache
+  -> RAG chunk retrieval
+  -> source note read
+  -> traditional keyword search fallback
+```
+
+Use cached synthesized answers when they are trustworthy. Use RAG chunks when a cached answer is missing or weak. Read full CodiMD notes only when the chunk context is insufficient or exact source wording matters.
+
+The agent machine must not connect to PostgreSQL directly. Database URLs, pgvector tables, CodiMD credentials, and other secrets stay on the CodiMD server.
+
+## Remote Execution
 
 Default remote host:
 
@@ -16,209 +28,131 @@ Default remote host:
 hscc@140.115.52.84
 ```
 
-Default CodiMD URL:
-
-```text
-http://140.115.52.84:3000
-```
-
-Preferred remote command pattern:
+Default command pattern:
 
 ```bash
 ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper <command> <args> --json
 ```
 
-Authentication should use SSH keys or an SSH agent. Do not store SSH passwords in this skill file, prompts, shell history, wrapper scripts, or repository files.
+If a local wrapper named `codimd-helper` exists, prefer it:
 
-Before using this skill from a new agent machine, verify:
+```bash
+codimd-helper <command> <args> --json
+```
+
+Before first use from a new machine, verify:
 
 ```bash
 ssh hscc@140.115.52.84 'echo ok'
 ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper search "healthcheck" --limit 1 --json
 ```
 
-If a local wrapper named `codimd-helper` exists on the agent machine, prefer using it:
+Always request JSON output for agent workflows.
 
-```bash
-codimd-helper search "3GPP" --json
-```
+## Core Commands
 
-The wrapper should forward arguments to the server:
+Read-only:
 
-```bash
-#!/usr/bin/env bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper "$@"
-```
-
-On Windows, the wrapper may be a `codimd-helper.cmd` file:
-
-```bat
-@echo off
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper %*
-```
-
-## Expected CLI Commands
-
-The server-side CLI should expose these commands:
-
+- `codimd-helper rag search-cache`
+- `codimd-helper rag retrieve`
+- `codimd-helper rag search-chunks`
 - `codimd-helper search`
 - `codimd-helper read`
-- `codimd-helper create`
-- `codimd-helper update`
-- `codimd-helper sync`
+
+Index and cache maintenance:
+
 - `codimd-helper rag init`
-- `codimd-helper rag search-cache`
-- `codimd-helper rag search-chunks`
-- `codimd-helper rag retrieve`
-- `codimd-helper rag index-note`
 - `codimd-helper rag index`
+- `codimd-helper rag index-note`
 - `codimd-helper rag upsert-chunk`
 - `codimd-helper rag upsert-answer`
+- `codimd-helper sync`
 
-For agent workflows, always prefer `--json`.
+Write operations:
 
-## When To Use
+- `codimd-helper create`
+- `codimd-helper update`
 
-Use this skill for requests such as:
+Create and update may be scaffolded or unavailable. Never write directly to PostgreSQL to create or update notes.
 
-- "Search my CodiMD notes for ..."
-- "Find notes related to ..."
-- "Read this CodiMD note."
-- "Summarize this CodiMD note."
-- "Turn this conversation into a CodiMD note."
-- "Update the meeting note with these action items."
-- "Sync or rebuild the CodiMD knowledge index."
-- "Use cached knowledge or RAG to answer from CodiMD."
-- "Find the answer if it already exists, otherwise search related notes."
+## Cache Architecture
 
-## Workflow
-
-### RAG Answer Cache
-
-Use the RAG cache when the agent can provide embeddings for the question and retrieved content. The intended flow is:
+The project uses three knowledge layers:
 
 ```text
-question
-  -> generate question embedding
-  -> search cached answers
-  -> if a trusted cached answer exists, answer with sources
-  -> otherwise search note chunks
-  -> read source notes only when chunk summaries are insufficient
-  -> synthesize answer
-  -> upsert the answer cache with source note/chunk IDs
+rag_answers
+  Cached synthesized answers with source note/chunk IDs.
+
+rag_chunks
+  Chunked note content, summaries, metadata, updatedAt snapshots, and pgvector embeddings.
+
+CodiMD notes table
+  Original source of truth for note markdown and updatedAt values.
 ```
 
-Search cached answers first:
+An answer cache entry is usable only when:
+
+1. The query matches the cached question strongly enough.
+2. The cached answer includes source note IDs or source chunk IDs.
+3. The answer confidence is appropriate for the task.
+4. Source notes are not known to be stale.
+5. The answer actually addresses the user's current question.
+
+Prefer source-based invalidation using CodiMD note `updatedAt`. Do not rely only on TTL-style expiration.
+
+## Default Question Workflow
+
+For user questions that ask for knowledge from CodiMD, follow this order.
+
+### 1. Search Answer Cache
+
+If an external embedding is available:
 
 ```bash
 ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag search-cache "<question>" --embedding "<json-vector>" --json
 ```
 
-Use a cached answer only when all of these are true:
-
-1. The response has `cacheHit: true`.
-2. The best answer has high `similarity`, normally at or above `RAG_ANSWER_SIMILARITY_THRESHOLD`.
-3. The answer includes `sourceNoteIds` or `sourceChunkIds`.
-4. The source notes are not known to be stale.
-
-If the cached answer is missing, weak, stale, or source-less, search chunks:
+If no external embedding is available, omit `--embedding`; the helper will use its built-in deterministic local hash embedding:
 
 ```bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag search-chunks --embedding "<json-vector>" --limit 8 --json
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag search-cache "<question>" --json
 ```
 
-If no external embedding is available, use the built-in local hash embedding retrieval:
+Use the cached answer directly only when the best result is clearly relevant, sourced, and fresh enough. Include source links or source note references when responding.
+
+If the cached answer is weak, missing, stale, source-less, or only partially answers the question, continue to RAG retrieval.
+
+### 2. Retrieve RAG Chunks
+
+Use the built-in retrieval path:
 
 ```bash
 ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag retrieve "<query>" --limit 8 --json
 ```
 
-When generating a final answer from chunks:
-
-1. Prefer chunk `summary` for quick synthesis.
-2. Use `content` when the summary is too vague.
-3. Use `codimd-helper read` for the original note when exact wording, broader context, or update timestamps matter.
-4. Cite the source CodiMD notes in the response.
-5. Clearly state when the answer is inferred from retrieved notes.
-
-After synthesizing a useful answer, store it:
+If an external embedding is available and a caller needs direct vector search:
 
 ```bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag upsert-answer \
-  --id "<stable-answer-id>" \
-  --question "<question>" \
-  --answer "<answer>" \
-  --embedding "<json-vector>" \
-  --source-note-id "<note-id>" \
-  --source-chunk-id "<chunk-id>" \
-  --note-updated-at-snapshot "{\"<note-id>\":\"<updatedAt>\"}" \
-  --confidence "<0-to-1>" \
-  --json
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag search-chunks --embedding "<json-vector>" --limit 8 --json
 ```
 
-Do not treat the RAG answer cache as authoritative if source notes have changed. Prefer source-based invalidation using note `updatedAt` over time-only expiration.
+When using chunks:
 
-### RAG Index Maintenance
+1. Prefer `summary` for quick synthesis.
+2. Use `content` for the actual evidence.
+3. Inspect `metadata.title`, `metadata.url`, and `noteUpdatedAt` when available.
+4. Cite source CodiMD URLs in the final answer when URLs are present.
+5. State when a conclusion is inferred from retrieved notes rather than explicitly written.
 
-Initialize RAG tables only during setup or migration:
+### 3. Read Source Notes
 
-```bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag init --json
-```
+Read full notes when:
 
-Use `rag upsert-chunk` when an indexing process has split notes into chunks and generated embeddings:
-
-```bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag upsert-chunk \
-  --id "<note-id>:<chunk-index>" \
-  --note-id "<note-id>" \
-  --chunk-index "<chunk-index>" \
-  --content "<chunk-text>" \
-  --summary "<chunk-summary>" \
-  --embedding "<json-vector>" \
-  --note-updated-at "<updatedAt>" \
-  --metadata "{}" \
-  --json
-```
-
-Embeddings must be JSON arrays whose length matches `RAG_EMBEDDING_DIMENSIONS` on the server.
-
-For built-in indexing, index a specific note:
-
-```bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag index-note "<note-url-or-id>" --json
-```
-
-Or index notes found by keyword search:
-
-```bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag index --query "<query>" --limit 10 --json
-```
-
-The built-in indexer currently uses deterministic local hash embeddings. Treat it as a working baseline for cache and retrieval plumbing; use a model-based embedding provider when semantic recall matters.
-
-### Search Notes
-
-Run:
-
-```bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper search "<query>" --json
-```
-
-Use `--limit` when the user asks for broader or narrower results:
-
-```bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper search "<query>" --limit 20 --json
-```
-
-Then:
-
-1. Parse the JSON response.
-2. Confirm `ok` is `true`.
-3. Return the most relevant notes with title, URL, updated date, and a short reason for relevance.
-4. If results are ambiguous, ask which note the user wants to inspect before updating anything.
-
-### Read Notes
+- Chunk content is not enough.
+- Exact wording matters.
+- The answer may affect a note update.
+- The retrieved chunks conflict.
+- The user asks to summarize or inspect a specific note.
 
 Run:
 
@@ -226,62 +160,117 @@ Run:
 ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper read "<note-url-or-id>" --json
 ```
 
-Then:
+Preserve Markdown semantics when summarizing. Separate facts found in notes from the agent's recommendations.
 
-1. Parse the JSON response.
-2. Preserve original Markdown semantics when summarizing.
-3. Mention title, tags, updated date, and source URL when available.
-4. Clearly separate facts found in the note from the agent's own recommendations.
+### 4. Fallback To Keyword Search
 
-### Create Notes
-
-Create is available only if the server-side CLI has implemented safe CodiMD creation through the application layer.
-
-Do not create notes by writing directly to PostgreSQL.
-
-If creation is available, prepare a Markdown file locally or on the server, then run:
+If RAG retrieval is empty or the topic has not been indexed, use keyword search:
 
 ```bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper create --title "<title>" --file "<markdown-file>" --json
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper search "<query>" --limit 20 --json
 ```
 
-Use a template when the user intent clearly matches one:
+After search, either read likely source notes or ask the user which note to inspect when results are ambiguous.
 
-- Meeting notes: `meeting-note`
-- Research notes: `research-note`
-- Daily notes: `daily-note`
+## Writing Back To Answer Cache
 
-### Update Notes
+After synthesizing a useful answer from reliable sources, cache it if the agent has enough source information.
 
-Update is available only if the server-side CLI has implemented safe CodiMD updates through the application layer.
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag upsert-answer \
+  --id "<stable-answer-id>" \
+  --question "<question>" \
+  --answer "<answer>" \
+  --source-note-id "<note-id>" \
+  --source-chunk-id "<chunk-id>" \
+  --note-updated-at-snapshot "{\"<note-id>\":\"<updatedAt>\"}" \
+  --confidence "<0-to-1>" \
+  --json
+```
 
-Do not update notes by writing directly to PostgreSQL.
+If an external embedding is required by the deployed helper version, include:
+
+```bash
+--embedding "<json-vector>"
+```
+
+Use conservative confidence:
+
+- `0.9-1.0`: directly supported by retrieved notes.
+- `0.7-0.89`: mostly supported but requires synthesis.
+- below `0.7`: usually do not cache unless the user explicitly asks for a rough draft.
+
+Do not cache answers that contain secrets, uncertain claims, outdated source material, or unsourced recommendations.
+
+## RAG Index Maintenance
+
+Initialize pgvector tables and indexes after setup or migration:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag init --json
+```
+
+Index one note:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag index-note "<note-url-or-id>" --json
+```
+
+Index notes found by keyword search:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag index --query "<query>" --limit 10 --json
+```
+
+Use this when the user asks for fresh RAG results, a topic has poor retrieval, or new CodiMD notes were added.
+
+The built-in indexer currently uses deterministic local hash embeddings. It is enough to exercise the cache and retrieval pipeline, especially for keywords, acronyms, and spec numbers. Prefer a model-based embedding provider when semantic recall matters.
+
+Embedding vectors must match `RAG_EMBEDDING_DIMENSIONS` on the server.
+
+## Traditional Search And Sync
+
+Use keyword search when RAG is unavailable, unindexed, or the user explicitly asks for a list of matching notes:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper search "<query>" --limit 20 --json
+```
+
+Use sync when the local non-RAG index needs refreshing:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper sync --json
+```
+
+For full rebuild:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper sync --full --json
+```
+
+## Create And Update Notes
+
+Create and update are allowed only through safe CodiMD application-layer CLI support.
+
+Do not create, update, or delete CodiMD notes by writing directly to PostgreSQL.
 
 Before updating:
 
 1. Read the existing note.
 2. Identify the exact section to update.
 3. Prefer append or targeted section replacement over full-note replacement.
-4. Ask for confirmation when the update is substantial or ambiguous.
+4. Ask for confirmation when the update is substantial, ambiguous, or destructive.
 
-If update is available, run:
+Create example:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper create --title "<title>" --file "<markdown-file>" --json
+```
+
+Update example:
 
 ```bash
 ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper update "<note-url-or-id>" --append --file "<markdown-file>" --json
-```
-
-### Sync Index
-
-If the user asks for fresh results, run:
-
-```bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper sync --json
-```
-
-For a full rebuild:
-
-```bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper sync --full --json
 ```
 
 ## Note Style
@@ -318,54 +307,57 @@ If SSH fails:
 1. Report that the remote CodiMD helper could not be reached.
 2. Mention the failed command.
 3. Ask the user to verify SSH access to `hscc@140.115.52.84`.
-4. Do not ask for or store the SSH password.
+4. Do not ask for or store SSH passwords.
 
 If the CLI returns `ok: false`:
 
 1. Report the `message` field.
-2. Do not invent search results.
+2. Do not invent search results or cached answers.
 3. Suggest the most likely operational fix only when clear.
 
 Common fixes:
 
 - `command not found`: install or symlink `/usr/local/bin/codimd-helper` on the CodiMD server.
 - `CODIMD_DB_URL is not configured`: check the server-side `.env`.
-- `could not open extension control file ... vector.control`: install pgvector in the PostgreSQL host/container that `CODIMD_DB_URL` points to, then rerun `codimd-helper rag init --json`.
-- `password/publickey denied`: fix SSH credentials from the agent machine.
-- Repeated password prompts: configure SSH key authentication or load the key into `ssh-agent`.
-- PostgreSQL connection errors: verify Docker compose database port or server-side DB URL.
+- `could not open extension control file ... vector.control`: install pgvector in the PostgreSQL host/container, then rerun `codimd-helper rag init --json`.
+- `relation "rag_chunks" does not exist`: run `codimd-helper rag init --json`.
+- Empty RAG retrieval: run `codimd-helper rag index --query "<topic>" --limit 10 --json`.
+- Embedding dimension errors: ensure vectors match `RAG_EMBEDDING_DIMENSIONS`.
+- PostgreSQL connection errors: verify Docker compose database port and server-side DB URL.
+- SSH permission errors: fix SSH key or account access.
 
 ## Safety Rules
 
-- Do not expose database credentials, cookies, session tokens, or private server configuration.
-- Do not store SSH passwords in `SKILL.md` or any agent-readable instruction file.
-- Do not ask the user to paste secrets into prompts unless absolutely necessary.
+- Do not expose database credentials, cookies, session tokens, SSH keys, or private server configuration.
+- Do not store SSH passwords in this file, prompts, shell history, wrapper scripts, or repository files.
 - Treat CodiMD URLs and note content as private.
 - Do not delete notes unless the user explicitly asks and confirms.
 - Do not overwrite a full note when append or section update is enough.
 - For uncertain note matches, ask for confirmation before updating.
 - Prefer read-only operations unless the user explicitly requests creation or update.
+- Do not present cached answers as fresh if the source notes may have changed.
 
-## Good Search Behavior
+## Search Quality
 
-When searching, expand the query with likely bilingual terms when useful. For example, include both Chinese and English forms when the user query suggests it:
+When searching or indexing, expand queries with likely bilingual or technical variants when useful. Examples:
 
-- meeting
-- paper
-- experiment
-- decision
-- todo
-- project
-- research
+- `3GPP`, `TS 38`, `NR`, `LTE`
+- `meeting`, plus the user's Chinese wording when present
+- `paper`, plus the user's Chinese wording when present
+- `experiment`, plus the user's Chinese wording when present
+- `decision`, plus the user's Chinese wording when present
+- `todo`, plus the user's Chinese wording when present
+- `research`, plus the user's Chinese wording when present
 
-Prefer returning a small, high-quality result set over a long list.
+Prefer a small, high-quality set of sourced results over a long unsorted list.
 
 ## Output Conventions
 
 When responding to the user:
 
 - Use Traditional Chinese by default.
-- Include CodiMD links as Markdown links.
+- Include CodiMD links as Markdown links when available.
 - Keep summaries short unless the user asks for detail.
-- Separate facts found in notes from your own recommendations.
-- When showing commands, prefer the local wrapper form if available; otherwise show the full SSH command.
+- Distinguish note facts from agent recommendations.
+- Say whether the answer came from cache, RAG retrieval, direct note read, or keyword search when that matters.
+- Prefer the local `codimd-helper` wrapper in examples if available; otherwise show the full SSH command.
