@@ -227,6 +227,64 @@ codimd-helper read "http://140.115.52.84:3000/example-note" --json
 codimd-helper sync --json
 ```
 
+## RAG Cache
+
+The RAG cache uses PostgreSQL with the `pgvector` extension. It keeps retrieved note chunks and generated answers in the same database as the existing CodiMD read path, so cached answers can be invalidated by source note `updatedAt` values.
+
+Configure the embedding shape:
+
+```env
+RAG_EMBEDDING_DIMENSIONS=1536
+RAG_ANSWER_SIMILARITY_THRESHOLD=0.9
+```
+
+Initialize the RAG tables and HNSW indexes:
+
+```bash
+codimd-helper rag init --json
+```
+
+The embedding arrays below are shortened for readability. In real use, pass a full vector with the same length as `RAG_EMBEDDING_DIMENSIONS`.
+
+Insert a retrieved chunk:
+
+```bash
+codimd-helper rag upsert-chunk \
+  --id "note-1:0" \
+  --note-id "note-1" \
+  --chunk-index 0 \
+  --content "Chunk text" \
+  --summary "Chunk summary" \
+  --embedding "[0.1,0.2,0.3]" \
+  --json
+```
+
+Insert an answer cache entry:
+
+```bash
+codimd-helper rag upsert-answer \
+  --id "answer-1" \
+  --question "What does this project use RAG for?" \
+  --answer "It caches synthesized answers and retrieves CodiMD note chunks when the cache is stale or missing." \
+  --embedding "[0.1,0.2,0.3]" \
+  --source-note-id "note-1" \
+  --source-chunk-id "note-1:0" \
+  --note-updated-at-snapshot "{\"note-1\":\"2026-06-22T00:00:00.000Z\"}" \
+  --json
+```
+
+Search cached answers before doing chunk retrieval:
+
+```bash
+codimd-helper rag search-cache "What does this project use RAG for?" --embedding "[0.1,0.2,0.3]" --json
+```
+
+Search note chunks when there is no trusted cached answer:
+
+```bash
+codimd-helper rag search-chunks --embedding "[0.1,0.2,0.3]" --limit 8 --json
+```
+
 ## Troubleshooting
 
 `Unexpected token '?'`
@@ -251,4 +309,3 @@ codimd-helper sync --json
 Repeated password prompts
 
 - Configure SSH key authentication or load the key into `ssh-agent`.
-

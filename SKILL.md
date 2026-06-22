@@ -66,6 +66,11 @@ The server-side CLI should expose these commands:
 - `codimd-helper create`
 - `codimd-helper update`
 - `codimd-helper sync`
+- `codimd-helper rag init`
+- `codimd-helper rag search-cache`
+- `codimd-helper rag search-chunks`
+- `codimd-helper rag upsert-chunk`
+- `codimd-helper rag upsert-answer`
 
 For agent workflows, always prefer `--json`.
 
@@ -80,8 +85,94 @@ Use this skill for requests such as:
 - "Turn this conversation into a CodiMD note."
 - "Update the meeting note with these action items."
 - "Sync or rebuild the CodiMD knowledge index."
+- "Use cached knowledge or RAG to answer from CodiMD."
+- "Find the answer if it already exists, otherwise search related notes."
 
 ## Workflow
+
+### RAG Answer Cache
+
+Use the RAG cache when the agent can provide embeddings for the question and retrieved content. The intended flow is:
+
+```text
+question
+  -> generate question embedding
+  -> search cached answers
+  -> if a trusted cached answer exists, answer with sources
+  -> otherwise search note chunks
+  -> read source notes only when chunk summaries are insufficient
+  -> synthesize answer
+  -> upsert the answer cache with source note/chunk IDs
+```
+
+Search cached answers first:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag search-cache "<question>" --embedding "<json-vector>" --json
+```
+
+Use a cached answer only when all of these are true:
+
+1. The response has `cacheHit: true`.
+2. The best answer has high `similarity`, normally at or above `RAG_ANSWER_SIMILARITY_THRESHOLD`.
+3. The answer includes `sourceNoteIds` or `sourceChunkIds`.
+4. The source notes are not known to be stale.
+
+If the cached answer is missing, weak, stale, or source-less, search chunks:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag search-chunks --embedding "<json-vector>" --limit 8 --json
+```
+
+When generating a final answer from chunks:
+
+1. Prefer chunk `summary` for quick synthesis.
+2. Use `content` when the summary is too vague.
+3. Use `codimd-helper read` for the original note when exact wording, broader context, or update timestamps matter.
+4. Cite the source CodiMD notes in the response.
+5. Clearly state when the answer is inferred from retrieved notes.
+
+After synthesizing a useful answer, store it:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag upsert-answer \
+  --id "<stable-answer-id>" \
+  --question "<question>" \
+  --answer "<answer>" \
+  --embedding "<json-vector>" \
+  --source-note-id "<note-id>" \
+  --source-chunk-id "<chunk-id>" \
+  --note-updated-at-snapshot "{\"<note-id>\":\"<updatedAt>\"}" \
+  --confidence "<0-to-1>" \
+  --json
+```
+
+Do not treat the RAG answer cache as authoritative if source notes have changed. Prefer source-based invalidation using note `updatedAt` over time-only expiration.
+
+### RAG Index Maintenance
+
+Initialize RAG tables only during setup or migration:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag init --json
+```
+
+Use `rag upsert-chunk` when an indexing process has split notes into chunks and generated embeddings:
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag upsert-chunk \
+  --id "<note-id>:<chunk-index>" \
+  --note-id "<note-id>" \
+  --chunk-index "<chunk-index>" \
+  --content "<chunk-text>" \
+  --summary "<chunk-summary>" \
+  --embedding "<json-vector>" \
+  --note-updated-at "<updatedAt>" \
+  --metadata "{}" \
+  --json
+```
+
+Embeddings must be JSON arrays whose length matches `RAG_EMBEDDING_DIMENSIONS` on the server.
 
 ### Search Notes
 

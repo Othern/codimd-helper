@@ -6,10 +6,11 @@ describe("CodimdClient", () => {
     const client = new CodimdClient({
       codimdBaseUrl: "http://140.115.52.84:3000",
       indexPath: "./data/index",
-      cachePath: "./data/cache"
+      cachePath: "./data/cache",
+      ragEmbeddingDimensions: 1536,
+      ragAnswerSimilarityThreshold: 0.9
     });
 
     expect(client.baseUrl).toBe("http://140.115.52.84:3000");
   });
 });
-
