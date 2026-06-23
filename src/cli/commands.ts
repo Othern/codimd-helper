@@ -1,6 +1,10 @@
 import { Command } from "commander";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { loadConfig } from "../config.js";
+import { CodimdClient } from "../codimd/client.js";
 import { CodimdDatabase } from "../codimd/database.js";
+import { applyTemplateVariables, buildNoteMarkdown } from "../codimd/markdown.js";
 import { searchNotes } from "../indexer/search.js";
 import { answerWithRagCache } from "../rag/answer.js";
 
@@ -12,6 +16,22 @@ export function runCli(argv = process.argv): void {
     .name("codimd-helper")
     .description("CLI helper for searching and managing CodiMD notes")
     .version("0.1.0");
+
+  program
+    .command("login")
+    .option("--email <email>", "CodiMD email; defaults to CODIMD_USERNAME")
+    .option("--password <password>", "CodiMD password; defaults to CODIMD_PASSWORD")
+    .option("--json", "Print machine-readable JSON")
+    .action(async (options: { email?: string; password?: string; json?: boolean }) => {
+      const client = new CodimdClient(config);
+
+      try {
+        const me = await client.login(options.email, options.password);
+        print({ ok: true, baseUrl: client.baseUrl, user: me, cookiePath: config.codimdCookiePath }, Boolean(options.json));
+      } catch (error) {
+        fail(error, Boolean(options.json));
+      }
+    });
 
   program
     .command("search")
@@ -71,20 +91,16 @@ export function runCli(argv = process.argv): void {
     .option("--template <name>", "Template name")
     .option("--tag <tag...>", "Tags")
     .option("--json", "Print machine-readable JSON")
-    .action((options: { title: string; file?: string; template?: string; tag?: string[]; json?: boolean }) => {
-      print(
-        {
-          ok: false,
-          error: "create_not_implemented",
-          message: "CodiMD create support is pending authentication/client implementation.",
-          title: options.title,
-          file: options.file,
-          template: options.template,
-          tags: options.tag ?? []
-        },
-        Boolean(options.json)
-      );
-      process.exitCode = 2;
+    .action(async (options: { title: string; file?: string; template?: string; tag?: string[]; json?: boolean }) => {
+      const client = new CodimdClient(config);
+
+      try {
+        const markdown = await loadCreateMarkdown(options.title, options.tag ?? [], options.file, options.template);
+        const note = await client.createNote(markdown);
+        print({ ok: true, baseUrl: client.baseUrl, note }, Boolean(options.json));
+      } catch (error) {
+        fail(error, Boolean(options.json));
+      }
     });
 
   program
@@ -128,6 +144,25 @@ export function runCli(argv = process.argv): void {
     });
 
   program.parse(argv);
+}
+
+async function loadCreateMarkdown(title: string, tags: string[], file?: string, template?: string): Promise<string> {
+  if (file && template) {
+    throw new Error("Use either --file or --template, not both.");
+  }
+
+  if (file) {
+    const body = await readFile(file, "utf8");
+    return buildNoteMarkdown(title, tags, body);
+  }
+
+  if (template) {
+    const templatePath = join(process.cwd(), "src", "templates", `${template}.md`);
+    const body = await readFile(templatePath, "utf8");
+    return applyTemplateVariables(body, title, tags);
+  }
+
+  return buildNoteMarkdown(title, tags, "");
 }
 
 function print(payload: unknown, asJson: boolean): void {

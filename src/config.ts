@@ -3,6 +3,10 @@ import "dotenv/config";
 export interface AppConfig {
   codimdBaseUrl: string;
   codimdDbUrl?: string;
+  codimdUsername?: string;
+  codimdPassword?: string;
+  codimdSessionCookie?: string;
+  codimdCookiePath: string;
   indexPath: string;
   cachePath: string;
   ragEmbeddingDimensions: number;
@@ -13,11 +17,17 @@ export interface AppConfig {
 }
 
 export function loadConfig(): AppConfig {
+  const cachePath = process.env.CACHE_PATH ?? "./data/cache";
+
   return {
     codimdBaseUrl: process.env.CODIMD_BASE_URL ?? "http://140.115.52.84:3000",
     codimdDbUrl: process.env.CODIMD_DB_URL,
+    codimdUsername: process.env.CODIMD_USERNAME,
+    codimdPassword: process.env.CODIMD_PASSWORD,
+    codimdSessionCookie: process.env.CODIMD_SESSION_COOKIE,
+    codimdCookiePath: process.env.CODIMD_COOKIE_PATH ?? `${cachePath}/codimd.cookies`,
     indexPath: process.env.INDEX_PATH ?? "./data/index",
-    cachePath: process.env.CACHE_PATH ?? "./data/cache",
+    cachePath,
     ragEmbeddingDimensions: parsePositiveInteger(process.env.RAG_EMBEDDING_DIMENSIONS, 1536),
     ragAnswerSimilarityThreshold: parseSimilarityThreshold(process.env.RAG_ANSWER_SIMILARITY_THRESHOLD, 0.9),
     ragAnswerCacheHitScoreThreshold: parseSimilarityThreshold(process.env.RAG_ANSWER_CACHE_HIT_SCORE_THRESHOLD, 0.85),

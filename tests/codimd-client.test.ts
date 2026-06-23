@@ -5,6 +5,7 @@ describe("CodimdClient", () => {
   it("exposes the configured base URL", () => {
     const client = new CodimdClient({
       codimdBaseUrl: "http://140.115.52.84:3000",
+      codimdCookiePath: "./data/cache/codimd.cookies",
       indexPath: "./data/index",
       cachePath: "./data/cache",
       ragEmbeddingDimensions: 1536,
