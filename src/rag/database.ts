@@ -27,7 +27,7 @@ export class RagDatabase {
     } catch (error) {
       if (isPgVectorMissingError(error)) {
         throw new Error(
-          "pgvector is not installed in this PostgreSQL instance. Install the pgvector package/extension in the database container or host, then rerun `codimd-helper rag init --json`."
+          "pgvector is not installed in this PostgreSQL instance. Install the pgvector package/extension in the database container or host, then rerun the cache-aware answer command."
         );
       }
 
