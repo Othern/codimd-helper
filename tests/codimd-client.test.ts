@@ -9,6 +9,7 @@ describe("CodimdClient", () => {
       cachePath: "./data/cache",
       ragEmbeddingDimensions: 1536,
       ragAnswerSimilarityThreshold: 0.9,
+      ragAnswerCacheHitScoreThreshold: 0.85,
       ragChunkMaxChars: 1800,
       ragChunkOverlapChars: 200
     });

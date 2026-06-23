@@ -10,13 +10,15 @@ The preferred knowledge workflow is:
 
 ```text
 question
-  -> answer cache
-  -> RAG chunk retrieval
-  -> source note read
-  -> traditional keyword search fallback
+  -> codimd-helper answer
+  -> score answer cache
+  -> return cached answer if score is high enough
+  -> otherwise query DB
+  -> synthesize answer from matching notes
+  -> write synthesized answer back to cache
 ```
 
-Use cached synthesized answers when they are trustworthy. Use RAG chunks when a cached answer is missing or weak. Read full CodiMD notes only when the chunk context is insufficient or exact source wording matters.
+Use the cache-aware answer command for normal questions. It treats RAG as a search/answer cache: high score returns cached content immediately; low score falls back to database search and writes the synthesized result back to cache.
 
 The agent machine must not connect to PostgreSQL directly. Database URLs, pgvector tables, CodiMD credentials, and other secrets stay on the CodiMD server.
 
@@ -53,6 +55,7 @@ Always request JSON output for agent workflows.
 
 Read-only:
 
+- `codimd-helper answer`
 - `codimd-helper rag search-cache`
 - `codimd-helper rag retrieve`
 - `codimd-helper rag search-chunks`
@@ -104,7 +107,19 @@ Prefer source-based invalidation using CodiMD note `updatedAt`. Do not rely only
 
 For user questions that ask for knowledge from CodiMD, follow this order.
 
-### 1. Search Answer Cache
+### 1. Use Cache-Aware Answer
+
+```bash
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper answer "<question>" --json
+```
+
+This is the default path for questions. It scores cached answers first. If the best cached answer score is at or above `RAG_ANSWER_CACHE_HIT_SCORE_THRESHOLD`, the command returns `mode: "answer_cache"` and the cached answer should be used directly.
+
+If the score is below the threshold, the command returns `mode: "db_fallback"` after querying the database, synthesizing an answer from matching notes, and writing that synthesized answer back to `rag_answers`.
+
+Only use the lower-level cache/retrieval commands when debugging the cache behavior or building indexes.
+
+### 2. Search Answer Cache Manually
 
 If an external embedding is available:
 
@@ -112,17 +127,9 @@ If an external embedding is available:
 ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag search-cache "<question>" --embedding "<json-vector>" --json
 ```
 
-If no external embedding is available, omit `--embedding`; the helper will use its built-in deterministic local hash embedding:
+If no external embedding is available and the deployed helper supports it, omit `--embedding`.
 
-```bash
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper rag search-cache "<question>" --json
-```
-
-Use the cached answer directly only when the best result is clearly relevant, sourced, and fresh enough. Include source links or source note references when responding.
-
-If the cached answer is weak, missing, stale, source-less, or only partially answers the question, continue to RAG retrieval.
-
-### 2. Retrieve RAG Chunks
+### 3. Retrieve RAG Chunks
 
 Use the built-in retrieval path:
 
@@ -144,7 +151,7 @@ When using chunks:
 4. Cite source CodiMD URLs in the final answer when URLs are present.
 5. State when a conclusion is inferred from retrieved notes rather than explicitly written.
 
-### 3. Read Source Notes
+### 4. Read Source Notes
 
 Read full notes when:
 
@@ -162,7 +169,7 @@ ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper read "<note-url-or-id>" -
 
 Preserve Markdown semantics when summarizing. Separate facts found in notes from the agent's recommendations.
 
-### 4. Fallback To Keyword Search
+### 5. Fallback To Keyword Search
 
 If RAG retrieval is empty or the topic has not been indexed, use keyword search:
 

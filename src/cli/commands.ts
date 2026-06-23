@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { loadConfig } from "../config.js";
 import { CodimdDatabase } from "../codimd/database.js";
 import { searchNotes } from "../indexer/search.js";
+import { answerWithRagCache } from "../rag/answer.js";
 import { RagDatabase } from "../rag/database.js";
 import { generateLocalEmbedding } from "../rag/embedding.js";
 import { indexNote, indexSearchResults } from "../rag/indexer.js";
@@ -50,6 +51,20 @@ export function runCli(argv = process.argv): void {
         fail(error, Boolean(options.json));
       } finally {
         await database.close();
+      }
+    });
+
+  program
+    .command("answer")
+    .argument("<question>", "Question to answer with RAG cache before falling back to database search")
+    .option("--limit <number>", "Maximum number of DB search results when cache misses", "10")
+    .option("--json", "Print machine-readable JSON")
+    .action(async (question: string, options: { limit: string; json?: boolean }) => {
+      try {
+        const result = await answerWithRagCache(config, question, Number.parseInt(options.limit, 10));
+        print(result, Boolean(options.json));
+      } catch (error) {
+        fail(error, Boolean(options.json));
       }
     });
 

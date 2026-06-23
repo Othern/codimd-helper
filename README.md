@@ -236,6 +236,7 @@ Configure the embedding shape:
 ```env
 RAG_EMBEDDING_DIMENSIONS=1536
 RAG_ANSWER_SIMILARITY_THRESHOLD=0.9
+RAG_ANSWER_CACHE_HIT_SCORE_THRESHOLD=0.85
 RAG_CHUNK_MAX_CHARS=1800
 RAG_CHUNK_OVERLAP_CHARS=200
 ```
@@ -306,6 +307,14 @@ Retrieve RAG chunks with the local embedding pipeline:
 ```bash
 codimd-helper rag retrieve "3GPP SIB 19" --limit 8 --json
 ```
+
+For normal question answering, use the cache-aware answer command:
+
+```bash
+codimd-helper answer "SIB19 是什麼" --json
+```
+
+This command scores cached answers first. If the best cached answer score is at or above `RAG_ANSWER_CACHE_HIT_SCORE_THRESHOLD`, it returns the cached answer directly. Otherwise it falls back to database search, synthesizes an answer from matching note summaries, and writes that answer back to `rag_answers`.
 
 ## Troubleshooting
 

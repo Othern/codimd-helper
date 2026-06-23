@@ -151,6 +151,17 @@ export class RagDatabase {
     assertEmbeddingDimensions(questionEmbedding, this.config.ragEmbeddingDimensions);
 
     const threshold = this.config.ragAnswerSimilarityThreshold;
+    return this.findCachedAnswerCandidates(question, questionEmbedding, limit, threshold);
+  }
+
+  async findCachedAnswerCandidates(
+    question: string,
+    questionEmbedding: number[],
+    limit = 3,
+    minimumSimilarity = 0
+  ): Promise<CachedRagAnswerMatch[]> {
+    assertEmbeddingDimensions(questionEmbedding, this.config.ragEmbeddingDimensions);
+
     const result = await this.pool.query(
       `
         SELECT
@@ -172,7 +183,7 @@ export class RagDatabase {
           question_embedding <=> $1::vector
         LIMIT $4
       `,
-      [toPgVector(questionEmbedding), normalizeQuestion(question), threshold, limit]
+      [toPgVector(questionEmbedding), normalizeQuestion(question), minimumSimilarity, limit]
     );
 
     return result.rows.map(rowToCachedAnswerMatch);
