@@ -1,6 +1,10 @@
+---
+name: codimd-helper
+description: Search, read, answer questions from, create, sync, or manage notes in the CodiMD instance at http://140.115.52.84:3000 using the remote codimd-helper over SSH. Use when the user mentions CodiMD, codimd-helper, CodiMD notes, recent articles, article names, note titles, or asks to search/list/read/create CodiMD notes.
+---
 # CodiMD Helper Skill
 
-Use this skill when the user wants to search, retrieve, summarize, answer questions from, create, or organize notes in the CodiMD instance at `http://140.115.52.84:3000` or a locally reachable CodiMD instance such as `http://localhost:3000`.
+Use this skill when the user wants to search, retrieve, summarize, answer questions from, create, or organize notes in the CodiMD instance at `http://140.115.52.84:3000`.
 
 ## Purpose
 
@@ -17,32 +21,9 @@ The helper currently supports:
 
 The helper should keep secrets on the machine where it runs. Do not expose database URLs, cookies, passwords, SSH keys, or session tokens in responses.
 
-## Execution Modes
+## Execution Mode
 
-There are two valid ways to run the CLI.
-
-### Local Machine
-
-Use this when CodiMD is reachable from the user's computer, for example `http://localhost:3000`.
-
-```powershell
-cd C:\Users\othern\Desktop\codimd-helper
-npm run build
-node dist\index.js <command> <args> --json
-```
-
-Set `.env` on the local machine:
-
-```env
-CODIMD_BASE_URL=http://localhost:3000
-CODIMD_USERNAME=
-CODIMD_PASSWORD=
-CODIMD_COOKIE_PATH=./data/cache/codimd.cookies
-```
-
-### Remote Server Wrapper
-
-Use this when the user's computer should call the server-side helper through SSH.
+Always call the server-side helper through SSH. Do not use a local `codimd-helper` wrapper, `Get-Command codimd-helper`, or `node dist\index.js` from the agent machine for task execution. The local wrapper reads the agent machine environment and can fail with `CODIMD_DB_URL is not configured`; that error usually means the wrong execution path was used.
 
 Default remote host:
 
@@ -50,22 +31,10 @@ Default remote host:
 hscc@140.115.52.84
 ```
 
-Default remote command:
+Default command form:
 
 ```bash
 ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper <command> <args> --json
-```
-
-If a local wrapper named `codimd-helper` exists, prefer it:
-
-```bash
-codimd-helper <command> <args> --json
-```
-
-The Windows wrapper installed by `scripts/install-agent-wrapper.ps1` calls:
-
-```powershell
-ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper %*
 ```
 
 Before first use from a new machine, verify:
@@ -76,6 +45,22 @@ ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper --help
 ```
 
 Always request JSON output for agent workflows.
+
+## Common Read Tasks
+
+List recent note/article titles by updated time:
+
+```bash
+ssh hscc@140.115.52.84 -- '/usr/local/bin/codimd-helper search '\''*'\'' --limit 10 --json'
+```
+
+PowerShell-safe form from the Codex desktop shell:
+
+```powershell
+ssh hscc@140.115.52.84 -- '/usr/local/bin/codimd-helper search ''*'' --limit 10 --json'
+```
+
+Use `search '*'` for recent-note listing because `answer` is optimized for question answering and may say no relevant note was found for list-style requests. Keep the remote command as one quoted argument so the remote shell does not expand `*` into filenames.
 
 ## Core Commands
 
@@ -105,22 +90,16 @@ Known limitation:
 
 Login stores a `connect.sid` session cookie at `CODIMD_COOKIE_PATH`, defaulting to `./data/cache/codimd.cookies`.
 
-Local example:
+Remote example:
 
 ```powershell
-node dist\index.js login --email "<email>" --password "<password>" --json
-```
-
-Wrapper example:
-
-```bash
-codimd-helper login --email "<email>" --password "<password>" --json
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper login --email "<email>" --password "<password>" --json
 ```
 
 If `CODIMD_USERNAME` and `CODIMD_PASSWORD` are set, the command can omit credentials:
 
 ```bash
-codimd-helper login --json
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper login --json
 ```
 
 Never print, store, or ask the user to paste real passwords into notes or public logs. If a command output includes cookies or credentials, redact them before responding.
@@ -142,19 +121,13 @@ The CLI performs the curl-like HTTP request inside `src/codimd/client.ts`, then 
 Create from a Markdown file:
 
 ```bash
-codimd-helper create --title "<title>" --file "<markdown-file>" --json
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper create --title "<title>" --file "<markdown-file>" --json
 ```
 
 Create from a built-in template:
 
 ```bash
-codimd-helper create --title "<title>" --template meeting-note --tag meeting --json
-```
-
-Local development form:
-
-```powershell
-node dist\index.js create --title "My Note" --file note.md --json
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper create --title "<title>" --template meeting-note --tag meeting --json
 ```
 
 Expected successful output shape:
@@ -162,11 +135,11 @@ Expected successful output shape:
 ```json
 {
   "ok": true,
-  "baseUrl": "http://localhost:3000",
+  "baseUrl": "http://140.115.52.84:3000",
   "note": {
     "id": "note-id",
-    "url": "http://localhost:3000/note-id",
-    "downloadUrl": "http://localhost:3000/note-id/download",
+    "url": "http://140.115.52.84:3000/note-id",
+    "downloadUrl": "http://140.115.52.84:3000/note-id/download",
     "updated": true
   }
 }
@@ -179,8 +152,8 @@ If `updated` is `false`, the note was still created through `/new`, but the foll
 For diagnosis only, the equivalent curl flow is:
 
 ```bash
-curl -i -c cookies.txt -b cookies.txt \
-  -X POST http://localhost:3000/login \
+ssh hscc@140.115.52.84 -- curl -i -c cookies.txt -b cookies.txt \
+  -X POST http://140.115.52.84:3000/login \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "email=<email>" \
   --data-urlencode "password=<password>"
@@ -189,14 +162,14 @@ curl -i -c cookies.txt -b cookies.txt \
 Confirm session:
 
 ```bash
-curl -i -b cookies.txt http://localhost:3000/me
+ssh hscc@140.115.52.84 -- curl -i -b cookies.txt http://140.115.52.84:3000/me
 ```
 
 Create note:
 
 ```bash
-curl -i -b cookies.txt \
-  -X POST http://localhost:3000/new \
+ssh hscc@140.115.52.84 -- curl -i -b cookies.txt \
+  -X POST http://140.115.52.84:3000/new \
   -H "Content-Type: text/markdown" \
   --data-binary @note.md
 ```
@@ -204,7 +177,7 @@ curl -i -b cookies.txt \
 Verify content:
 
 ```bash
-curl -i -b cookies.txt http://localhost:3000/<note-id>/download
+ssh hscc@140.115.52.84 -- curl -i -b cookies.txt http://140.115.52.84:3000/<note-id>/download
 ```
 
 Use the CLI rather than raw curl for normal agent work.
@@ -214,7 +187,7 @@ Use the CLI rather than raw curl for normal agent work.
 Use `answer` for normal questions:
 
 ```bash
-codimd-helper answer "<question>" --json
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper answer "<question>" --json
 ```
 
 The command returns one of two modes:
@@ -239,7 +212,7 @@ Read full notes when:
 Run:
 
 ```bash
-codimd-helper read "<note-url-or-id>" --json
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper read "<note-url-or-id>" --json
 ```
 
 Preserve Markdown semantics when summarizing. Separate facts found in notes from the agent's recommendations.
@@ -249,7 +222,7 @@ Preserve Markdown semantics when summarizing. Separate facts found in notes from
 Use keyword search when the user explicitly asks for a list of matching notes, or when `answer` does not provide enough context:
 
 ```bash
-codimd-helper search "<query>" --limit 20 --json
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper search "<query>" --limit 20 --json
 ```
 
 After search, either read likely source notes or ask the user which note to inspect when results are ambiguous.
@@ -259,13 +232,13 @@ After search, either read likely source notes or ask the user which note to insp
 Use sync when the local non-RAG index needs refreshing:
 
 ```bash
-codimd-helper sync --json
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper sync --json
 ```
 
 For full rebuild:
 
 ```bash
-codimd-helper sync --full --json
+ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper sync --full --json
 ```
 
 ## Note Style
@@ -310,12 +283,12 @@ If login fails:
 
 1. Check that `CODIMD_BASE_URL` matches the host used by CodiMD.
 2. Check that the account exists and the password is correct.
-3. Run `codimd-helper login --json` again.
-4. Verify with `codimd-helper create` or the `/me` diagnostic only when needed.
+3. Run `ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper login --json` again.
+4. Verify with `ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper create ... --json` or the `/me` diagnostic only when needed.
 
 If create returns an authentication error:
 
-1. Run `codimd-helper login --json`.
+1. Run `ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper login --json`.
 2. Confirm `CODIMD_COOKIE_PATH` is writable.
 3. Retry create with `--json`.
 
@@ -327,16 +300,16 @@ If a created note URL shows Internal Server Error in a browser but `/download` w
 
 Common fixes:
 
-- `command not found`: install or symlink `/usr/local/bin/codimd-helper` on the CodiMD server, or use `node dist\index.js` locally.
+- `command not found`: install or symlink `/usr/local/bin/codimd-helper` on the CodiMD server.
 - `CODIMD_DB_URL is not configured`: check the environment where read/search commands run.
-- `CodiMD session is missing or expired`: run `codimd-helper login --json`.
+- `CodiMD session is missing or expired`: run `ssh hscc@140.115.52.84 -- /usr/local/bin/codimd-helper login --json`.
 - PostgreSQL connection errors: verify Docker compose database port and DB URL in the runtime environment.
 - SSH permission errors: fix SSH key or account access.
 
 ## Safety Rules
 
 - Do not expose database credentials, cookies, session tokens, SSH keys, or private server configuration.
-- Do not store SSH passwords in this file, prompts, shell history, wrapper scripts, or repository files.
+- Do not store SSH passwords in this file, prompts, shell history, or repository files.
 - Treat CodiMD URLs and note content as private.
 - Do not delete notes unless the user explicitly asks and confirms.
 - Do not overwrite a full note when append or section update is enough.
@@ -367,4 +340,5 @@ When responding to the user:
 - Keep summaries short unless the user asks for detail.
 - Distinguish note facts from agent recommendations.
 - Say whether the answer came from answer cache, database fallback, direct note read, keyword search, or create result when that matters.
-- Prefer the local `codimd-helper` wrapper in examples if available; otherwise show `node dist\index.js` for local use or the full SSH command for remote use.
+- Use the full SSH command in examples.
+
